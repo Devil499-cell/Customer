@@ -1,0 +1,7 @@
+{
+  "name": "prakhar-number-api",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "number.js",
+  "dependencies": {}
+}
