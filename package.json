@@ -3,5 +3,8 @@
   "version": "1.0.0",
   "type": "module",
   "main": "number.js",
-  "dependencies": {}
+  "dependencies": {},
+  "engines": {
+    "node": ">=18.x"
+  }
 }
