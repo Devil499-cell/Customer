@@ -43,10 +43,26 @@ export default async function handler(req, res) {
             });
         }
         
-        // Original API call
+        // ✅ FIX: Original API call with proper error handling
         const originalUrl = `https://all-number-info-rajan-eta.vercel.app/api?number=${number}`;
-        const response = await fetch(originalUrl);
-        const data = await response.json();
+        
+        let data;
+        try {
+            const response = await fetch(originalUrl);
+            if (!response.ok) {
+                throw new Error(`API returned ${response.status}`);
+            }
+            data = await response.json();
+        } catch (fetchError) {
+            console.error('Fetch error:', fetchError);
+            return res.status(200).json({
+                success: false,
+                user: "@Fghgddggf",
+                number: number,
+                message: "Original API is down or unreachable",
+                error: fetchError.message
+            });
+        }
         
         // 📌 SAB RECORDS STORE KARO (DUPLICATE KE SAATH BHI)
         const records = [];
