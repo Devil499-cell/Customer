@@ -117,7 +117,7 @@ export default async function handler(req, res) {
         return res.status(200).json({
             success: true,
             user: "@Fghgddggf",
-            developer: "@Fghgddggf",
+            developer: "@Devil_x_Empire",
             number: number,
             total_records: records.length,
             records: records,
