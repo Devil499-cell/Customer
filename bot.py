@@ -247,15 +247,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= MAIN =================
 if __name__ == '__main__':
-    # FIX: Use try-except for Python 3.13 compatibility
-    try:
-        # Method 1: Standard way
-        app = Application.builder().token(BOT_TOKEN).build()
-    except AttributeError:
-        # Method 2: Fallback for Python 3.13
-        from telegram.ext import Updater
-        updater = Updater(token=BOT_TOKEN)
-        app = updater.application
+    # IMPORTANT FIX: Use Application instead of ApplicationBuilder
+    app = Application.builder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('num', handle_message))
