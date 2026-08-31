@@ -4,7 +4,7 @@ import requests
 import logging
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
 # ================= CONFIGURATION =================
 BOT_TOKEN = '8620790590:AAEovcplZZoxBKRTGCgFXXtbSGcMTXXi1jo'
@@ -212,7 +212,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data = response.json()
         
         formatted_response = format_response(data, number)
-        # EDIT the processing message with REPLY mode
         await processing_msg.edit_text(formatted_response, parse_mode='HTML')
         
     except requests.exceptions.Timeout:
@@ -248,7 +247,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= MAIN =================
 if __name__ == '__main__':
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    # IMPORTANT FIX: Use Application instead of ApplicationBuilder
+    app = Application.builder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler('start', start))
     app.add_handler(CommandHandler('num', handle_message))
