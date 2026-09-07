@@ -1,8 +1,7 @@
-fastapi==0.115.6
-gradio==5.9.0
-duckdb==1.1.3
-httpx==0.28.1
-uvicorn[standard]==0.34.0
-pydantic==2.10.4
-python-multipart==0.0.20
-ruff==0.8.6
+fastapi==0.95.2
+gradio==3.41.2
+duckdb==0.8.1
+httpx==0.24.1
+uvicorn[standard]==0.23.2
+pydantic==1.10.12
+python-multipart==0.0.6
