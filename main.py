@@ -6,13 +6,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 import duckdb
 import gradio as gr
-import httpx
 from fastapi import FastAPI, Query, Response
 
 # ── Config ──────────────────────────────────────────────────────────────
-# Remote indexed parts (ICMR style!)
+# CORRECTED: Each part has /data_0.parquet inside
 HF_BASE = "https://huggingface.co/datasets/sauravsingh2111/Tgdata/resolve/main/TG_DATA_PARTS"
-REMOTE_PARTS = [f"{HF_BASE}/part_id={i}" for i in range(54)]  # 0-53 parts
+REMOTE_PARTS = [f"{HF_BASE}/part_id={i}/data_0.parquet" for i in range(54)]
 
 PARALLELISM = int(os.environ.get("TG_PARALLEL", "2"))
 THREADS_PER_CONN = int(os.environ.get("TG_THREADS_PER_CONN", "2"))
@@ -31,7 +30,7 @@ def _new_conn():
     con.execute("INSTALL httpfs; LOAD httpfs;")
     con.execute(f"SET threads = {THREADS_PER_CONN}")
     
-    # ICMR style: read all parts as view
+    # Read all parts with correct path
     part_list = ", ".join([f"'{url}'" for url in REMOTE_PARTS])
     con.execute(f"""
         CREATE OR REPLACE VIEW tg_data AS 
@@ -58,26 +57,29 @@ def _search(q: str, limit: int = 10):
     
     con = _get_conn()
     
-    # Detect columns (like ICMR)
+    # Get actual column names from the data
     try:
         sample = con.execute("SELECT * FROM tg_data LIMIT 1").fetchall()
         columns = [d[0] for d in con.description]
+        print(f"✅ Columns: {columns}")  # Debug log
     except Exception as e:
-        return {"query": q, "count": 0, "results": [], "error": str(e)}
+        return {"query": q, "count": 0, "results": [], "error": f"Failed to read data: {str(e)}"}
     
-    # Search in available columns
+    # Search in available columns (based on actual schema)
     search_fields = []
-    if 'phoneNumber' in columns and q.isdigit() and len(q) >= 8:
-        search_fields.append(("phoneNumber", f"= '{q}'"))
+    if 'user_id' in columns and q.isdigit() and len(q) >= 8:
+        search_fields.append(("user_id", f"= {q}"))  # user_id is integer
     if 'username' in columns:
         search_fields.append(("username", f"ILIKE '%{q}%'"))
-    if 'name' in columns:
-        search_fields.append(("name", f"ILIKE '%{q}%'"))
+    if 'first_name' in columns:
+        search_fields.append(("first_name", f"ILIKE '%{q}%'"))
+    if 'phone' in columns and q.isdigit() and len(q) >= 8:
+        search_fields.append(("phone", f"= '{q}'"))
     
     # Fallback: search in any text column
     if not search_fields:
         for col in columns:
-            if col not in ['phoneNumber', 'username', 'name']:
+            if col not in ['user_id']:
                 search_fields.append((col, f"ILIKE '%{q}%'"))
                 break
     
@@ -90,13 +92,14 @@ def _search(q: str, limit: int = 10):
                 results = [dict(zip(cols, r)) for r in rows][:limit]
                 return {"query": q, "count": len(results), "results": results, "searched_in": field}
         except Exception as e:
+            print(f"⚠️ Search failed for {field}: {e}")
             continue
     
     return {"query": q, "count": 0, "results": []}
 
 # ── FastAPI ──────────────────────────────────────────────────────────────
 fastapi_app = FastAPI(
-    title="Telegram Search API (Indexed Parts)",
+    title="Telegram Search API (Fixed)",
     description="🚀 Built by @SOCIALBANNERR | Channel: @modxpatel"
 )
 
@@ -109,7 +112,7 @@ def root():
         "dataset": "sauravsingh2111/Tgdata",
         "parts": len(REMOTE_PARTS),
         "status": "active",
-        "note": "Using indexed parts (ICMR style)"
+        "note": "Using corrected path: part_id=X/data_0.parquet"
     }
 
 @fastapi_app.get("/health")
@@ -156,12 +159,12 @@ def search_ui(query, limit):
 demo = gr.Interface(
     fn=search_ui,
     inputs=[
-        gr.Textbox(label="🔍 Search", placeholder="Phone, username, or name..."),
+        gr.Textbox(label="🔍 Search", placeholder="User ID, username, or name..."),
         gr.Slider(1, 50, value=10, step=1, label="Max Results")
     ],
     outputs=gr.Markdown(),
-    title="📡 Telegram Search API (Indexed Parts)",
-    description="Search 4.9 GB Telegram database | Built by @SOCIALBANNERR"
+    title="📡 Telegram Search API (Fixed Path)",
+    description="Search Telegram database | Built by @SOCIALBANNERR"
 )
 
 app = gr.mount_gradio_app(fastapi_app, demo, path="/")
