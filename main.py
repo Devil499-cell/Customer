@@ -6,8 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import duckdb
 import gradio as gr
-import httpx
 from fastapi import FastAPI, Query, Response
+import uvicorn
 
 # ── Config ──────────────────────────────────────────────────────────────
 REMOTE_URL = "https://huggingface.co/datasets/sauravsingh2111/Tgdata/resolve/main/TELEGRAM_MASTER_DB.parquet"
@@ -27,10 +27,22 @@ def _new_conn():
     con.execute("INSTALL parquet; LOAD parquet;")
     con.execute("INSTALL httpfs; LOAD httpfs;")
     con.execute(f"SET threads = {THREADS_PER_CONN}")
+    
+    # Create view
     con.execute(f"""
         CREATE OR REPLACE VIEW tg_data AS 
         SELECT * FROM read_parquet('{REMOTE_URL}')
     """)
+    
+    # Detect columns (for debugging)
+    try:
+        cols = con.execute("SELECT * FROM tg_data LIMIT 1").fetchall()
+        if cols:
+            col_names = [d[0] for d in con.description]
+            print(f"✅ Columns detected: {col_names}")
+    except Exception as e:
+        print(f"⚠️ Column detection failed: {e}")
+    
     return con
 
 def _get_conn():
@@ -50,35 +62,54 @@ def _search(q: str, limit: int = 10):
     if not q:
         return {"query": q, "count": 0, "results": []}
     
-    # Phone number exact match
-    if q.isdigit() and len(q) >= 8:
-        sql = f"SELECT * FROM tg_data WHERE phoneNumber = '{q}' LIMIT {limit + 5}"
-        con = _get_conn()
-        rows = con.execute(sql).fetchall()
-        if rows:
-            cols = [d[0] for d in con.description]
-            results = [dict(zip(cols, r)) for r in rows][:limit]
-            return {"query": q, "count": len(results), "results": results}
-    
-    # Username contains
-    sql = f"SELECT * FROM tg_data WHERE username ILIKE '%{q}%' LIMIT {limit + 5}"
     con = _get_conn()
-    rows = con.execute(sql).fetchall()
-    if rows:
-        cols = [d[0] for d in con.description]
-        results = [dict(zip(cols, r)) for r in rows][:limit]
-        return {"query": q, "count": len(results), "results": results}
     
-    # Name contains
-    sql = f"SELECT * FROM tg_data WHERE name ILIKE '%{q}%' LIMIT {limit + 5}"
-    con = _get_conn()
-    rows = con.execute(sql).fetchall()
-    if rows:
-        cols = [d[0] for d in con.description]
-        results = [dict(zip(cols, r)) for r in rows][:limit]
-        return {"query": q, "count": len(results), "results": results}
+    # First, get column names
+    try:
+        sample = con.execute("SELECT * FROM tg_data LIMIT 1").fetchall()
+        if not sample:
+            return {"query": q, "count": 0, "results": [], "error": "No data in dataset"}
+        columns = [d[0] for d in con.description]
+        print(f"🔍 Columns: {columns}")
+    except Exception as e:
+        return {"query": q, "count": 0, "results": [], "error": f"Failed to read data: {str(e)}"}
     
-    return {"query": q, "count": 0, "results": []}
+    # Build search queries dynamically based on available columns
+    search_queries = []
+    
+    # Phone number (if column exists)
+    if 'phoneNumber' in columns and q.isdigit() and len(q) >= 8:
+        search_queries.append(("phoneNumber", f"= '{q}'"))
+    
+    # Username (if column exists)
+    if 'username' in columns:
+        search_queries.append(("username", f"ILIKE '%{q}%'"))
+    
+    # Name (if column exists)
+    if 'name' in columns:
+        search_queries.append(("name", f"ILIKE '%{q}%'"))
+    
+    # If no specific columns, try any text column
+    if not search_queries:
+        for col in columns:
+            if col not in ['phoneNumber', 'username', 'name']:
+                search_queries.append((col, f"ILIKE '%{q}%'"))
+                break
+    
+    # Execute searches
+    for field, condition in search_queries:
+        try:
+            sql = f"SELECT * FROM tg_data WHERE {field} {condition} LIMIT {limit + 5}"
+            rows = con.execute(sql).fetchall()
+            if rows:
+                cols = [d[0] for d in con.description]
+                results = [dict(zip(cols, r)) for r in rows][:limit]
+                return {"query": q, "count": len(results), "results": results, "searched_in": field}
+        except Exception as e:
+            print(f"⚠️ Search failed for {field}: {e}")
+            continue
+    
+    return {"query": q, "count": 0, "results": [], "message": "No results found"}
 
 # ── FastAPI ──────────────────────────────────────────────────────────────
 fastapi_app = FastAPI(
@@ -92,21 +123,39 @@ def root():
         "app": "Telegram Search API",
         "developer": "@SOCIALBANNERR",
         "channel": "@modxpatel",
-        "dataset": "sauravsingh2111/Tgdata"
+        "dataset": "sauravsingh2111/Tgdata",
+        "status": "active"
     }
 
 @fastapi_app.get("/health")
 def health():
-    return {"status": "ok", "developer": "@SOCIALBANNERR"}
+    try:
+        con = _get_conn()
+        con.execute("SELECT 1").fetchall()
+        return {"status": "ok", "db": "connected", "developer": "@SOCIALBANNERR"}
+    except Exception as e:
+        return {"status": "error", "db": f"failed: {str(e)}", "developer": "@SOCIALBANNERR"}
 
 @fastapi_app.get("/search")
 async def search(q: str = Query(...), limit: int = Query(10, ge=1, le=100)):
     loop = asyncio.get_running_loop()
-    data = await loop.run_in_executor(pool, _search, q, limit)
-    return Response(
-        content=json.dumps(data, indent=2),
-        media_type="application/json"
-    )
+    try:
+        data = await loop.run_in_executor(pool, _search, q, limit)
+        return Response(
+            content=json.dumps(data, indent=2, default=str),
+            media_type="application/json"
+        )
+    except Exception as e:
+        error_response = {
+            "query": q,
+            "error": str(e),
+            "developer": "@SOCIALBANNERR"
+        }
+        return Response(
+            content=json.dumps(error_response, indent=2),
+            media_type="application/json",
+            status_code=500
+        )
 
 # ── Gradio UI ──────────────────────────────────────────────────────────
 def search_ui(query, limit):
@@ -114,10 +163,16 @@ def search_ui(query, limit):
         return "⚠️ Kuch search karo!"
     try:
         data = _search(query, int(limit))
-        if not data["results"]:
+        if "error" in data:
+            return f"❌ Error: {data['error']}"
+        if not data.get("results"):
             return f"❌ No results for: **{query}**"
         
-        out = f"🔍 **{query}** - {data['count']} results\n\n"
+        out = f"🔍 **{query}** - {data['count']} results"
+        if data.get("searched_in"):
+            out += f" (searched in: {data['searched_in']})"
+        out += "\n\n"
+        
         for i, row in enumerate(data["results"], 1):
             fields = [f"{k}: {v}" for k, v in row.items() if v]
             out += f"**{i}.** " + ", ".join(fields[:5]) + "\n\n"
@@ -133,12 +188,11 @@ demo = gr.Interface(
     ],
     outputs=gr.Markdown(),
     title="📡 Telegram Search API",
-    description="Search 7.94 GB Telegram database | Built by @SOCIALBANNERR"
+    description="Search Telegram database | Built by @SOCIALBANNERR"
 )
 
 app = gr.mount_gradio_app(fastapi_app, demo, path="/")
 
 if __name__ == "__main__":
-    import uvicorn
     port = int(os.getenv("PORT", 7860))
     uvicorn.run(app, host="0.0.0.0", port=port)
