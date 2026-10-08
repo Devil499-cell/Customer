@@ -1,4 +1,2 @@
-fastapi
-gradio
-httpx
-uvicorn[standard]
+python-telegram-bot==22.8
+aiohttp==3.10.5
